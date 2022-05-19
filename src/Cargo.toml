@@ -1,0 +1,21 @@
+[package]
+name = "ic_signer"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "ic_signer/src/lib.rs"
+crate-type = ["cdylib"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+candid = "0.7"
+ic-cdk = "0.5"
+ic-cdk-macros = "0.5"
+base64 = "0.13"
+serde = { version = "1", features = ["derive"] }
+hex = { version = "0.4.3", features = ["serde"] }
+getrandom = { version = "0.2", features = ["custom"] }
+sha3 = "0.10"
+k256 = { version = "0.10", default-features = false, features = [ "ecdsa", "sha256", "keccak256", "pem" ] }

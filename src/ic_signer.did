@@ -1,0 +1,27 @@
+type http_header = record { text; text };
+
+type strategy = variant {
+    Callback: record {
+        token: reserved;
+        callback: func () -> ()
+    }
+};
+
+type http_response = record {
+  status_code: nat;
+  headers: vec http_header;
+  body: blob;
+  streaming_strategy: opt strategy;
+  upgrade: opt bool;
+};
+
+service: {
+    test: () -> (blob) query;
+
+    http_request : (record {
+    url : text;
+    method : text;
+    headers: vec http_header;
+    body : opt blob;
+  }) -> (http_response) query;
+}

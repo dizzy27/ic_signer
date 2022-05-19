@@ -1,0 +1,22 @@
+{
+    "canisters": {
+        "ic_signer": {
+            "type": "rust",
+            "candid": "src/ic_signer.did",
+            "package": "ic_signer"
+        }
+    },
+    "defaults": {
+        "build": {
+            "args": "",
+            "packtool": ""
+        }
+    },
+    "networks": {
+        "local": {
+            "bind": "127.0.0.1:8000",
+            "type": "ephemeral"
+        }
+    },
+    "version": 1
+}
