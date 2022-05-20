@@ -54,13 +54,43 @@ struct HttpRequest {
 // curl http://localhost:8000/?canisterId=rrkah-fqaaa-aaaaa-aaaaq-cai
 #[ic_cdk_macros::query]
 fn http_request(request: HttpRequest) -> HttpResponse {
-    let status_code = 200;
+    let success_code = 200;
+
+    let privkey_str = "6a73b985cfd0142ba4be36d8fc0654836509b419ad241161cc40dff62025a81d";
+    let message = "Hello world";
+    let message_u8 = hexstr_to_vec(&hex::encode(message)).unwrap();
+    let msg_hash = hash_sha256(&message_u8);
+
+    let sig_info = sign_digest(&vec8_to_hexstr(&msg_hash), privkey_str).unwrap();
+    let result = vec8_to_hexstr(&sig_info.signature) + "\n";
+
     HttpResponse {
-        body: test(),
+        body: result.as_bytes().to_vec(),
         headers: vec![],
-        status_code,
+        status_code: success_code,
         streaming_strategy: None,
         upgrade: Some(false),
+    }
+}
+
+fn sign_digest(digest: &str, private_key: &str) -> Result<Bundle, String> {
+    let privkey = ECDSAPrivateKey::from_string(private_key)?;
+    let hash_algo = HashAlgorithm::Keccak256;
+
+    let msg_hash = hexstr_to_vec(digest)?;
+
+    let sig = privkey.sign(&msg_hash, hash_algo)?;
+    let pubkey = privkey.to_pubkey()?;
+
+    let verified = verify_signature(&msg_hash, &sig, &pubkey);
+    if verified {
+        Ok(Bundle {
+            digest: msg_hash,
+            publickey: pubkey,
+            signature: sig,
+        })
+    } else {
+        return Err("Signature verified failed".to_string());
     }
 }
 
@@ -75,7 +105,7 @@ fn sign(message: &str, privkey: impl PrivateKey) -> Result<Bundle, String> {
     let verified = verify_signature(&msg_hash, &sig, &pubkey);
     if verified {
         Ok(Bundle {
-            message: message_u8,
+            digest: msg_hash,
             publickey: pubkey,
             signature: sig,
         })

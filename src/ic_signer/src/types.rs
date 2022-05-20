@@ -37,7 +37,7 @@ pub trait PublicKey {
 
 #[derive(Serialize, Debug)]
 pub struct Bundle {
-    pub message: Vec<u8>,
+    pub digest: Vec<u8>,
     pub publickey: Vec<u8>,
     pub signature: Vec<u8>,
 }

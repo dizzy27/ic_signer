@@ -8,7 +8,7 @@ type strategy = variant {
 };
 
 type http_response = record {
-  status_code: nat;
+  status_code: nat16;
   headers: vec http_header;
   body: blob;
   streaming_strategy: opt strategy;
