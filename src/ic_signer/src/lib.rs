@@ -7,13 +7,26 @@ use utils::{hash_keccak256, hash_sha256, hexstr_to_vec, vec8_to_hexstr, verify_s
 // use k256::sha2::{Sha256, Sha512, Digest};
 
 // use ic_cdk::api::call::CallResult;
-use ic_cdk::export::candid::{CandidType, Deserialize, Nat, Func};
+use ic_cdk::export::candid::{CandidType, Deserialize, Func, Nat};
+use serde_json;
 
 #[derive(CandidType, Deserialize)]
-pub struct HttpHeader(String, String);
+struct HttpHeader(String, String);
+
+// impl From<&HttpHeader> for JsonValue {
+//     fn from(header: &HttpHeader) -> Self {
+//         let mut json_obj = Object::new();
+
+//         let name = header.0.clone();
+//         let value = header.1.clone();
+//         json_obj.insert("name", JsonValue::String(name));
+//         json_obj.insert("value", JsonValue::String(value));
+//         JsonValue::Object(json_obj)
+//     }
+// }
 
 #[derive(Debug, Clone, CandidType, Deserialize)]
-pub struct Token {
+struct Token {
     key: String,
     content_encoding: String,
     index: Nat,
@@ -21,55 +34,129 @@ pub struct Token {
 }
 
 #[derive(Debug, Clone, CandidType, Deserialize)]
-pub struct CallbackStrategy {
+struct CallbackStrategy {
     /// The callback function to be called to continue the stream.
-    pub callback: Func,
+    callback: Func,
     /// The token to pass to the function.
-    pub token: Token,
+    token: Token,
 }
 
 #[derive(Debug, Clone, CandidType, Deserialize)]
-pub enum StreamingStrategy {
+enum StreamingStrategy {
     /// A callback-based streaming strategy, where a callback function is provided for continuing the stream.
     Callback(CallbackStrategy),
 }
 
 #[derive(CandidType, Deserialize)]
-pub struct HttpResponse {
-    pub status_code: u16,
-    pub body: Vec<u8>,
-    pub headers: Vec<HttpHeader>,
-    pub streaming_strategy: Option<StreamingStrategy>,
-    pub upgrade: Option<bool>,
+struct HttpResponse {
+    status_code: u16,
+    body: Vec<u8>,
+    headers: Vec<HttpHeader>,
+    streaming_strategy: Option<StreamingStrategy>,
+    upgrade: Option<bool>,
 }
 
 #[derive(CandidType, Deserialize)]
 struct HttpRequest {
-    pub url: String,
-    pub method: String,
-    pub body: Option<Vec<u8>>,
-    pub headers: Vec<HttpHeader>,
+    url: String,
+    method: String,
+    body: Option<Vec<u8>>,
+    headers: Vec<HttpHeader>,
 }
+
+// impl From<&HttpRequest> for JsonValue {
+//     fn from(req: &HttpRequest) -> Self {
+//         let mut json_obj = Object::new();
+
+//         let url = req.url.clone();
+//         let method = req.method.clone();
+//         json_obj.insert("url", JsonValue::String(url));
+//         json_obj.insert("method", JsonValue::String(method));
+
+//         match req.body.clone() {
+//             Some(body) => {
+//                 let body_str = String::from_utf8(body).unwrap();
+//                 json_obj.insert("body", JsonValue::String(body_str));
+//             }
+//             _ => (),
+//         }
+
+//         let mut headers: Vec<JsonValue> = Vec::new();
+//         for header in &req.headers {
+//             let h = JsonValue::from(header);
+//             headers.push(h);
+//         }
+//         json_obj.insert("headers", JsonValue::Array(headers));
+//         JsonValue::Object(json_obj)
+//     }
+// }
+
+#[derive(serde::Deserialize)]
+struct JsonRPC {
+    id: String,
+    method: String,
+    params: Vec<String>,
+}
+
+// #[derive(serde::Serialize)]
+// struct JsonRPCResponse {
+//     id: String,
+//     result: String,
+// }
 
 // curl http://localhost:8000/?canisterId=rrkah-fqaaa-aaaaa-aaaaq-cai
 #[ic_cdk_macros::query]
 fn http_request(request: HttpRequest) -> HttpResponse {
-    let success_code = 200;
+    let mut status_code = 404;
+    let mut res_body = String::new();
 
-    let privkey_str = "6a73b985cfd0142ba4be36d8fc0654836509b419ad241161cc40dff62025a81d";
-    let message = "Hello world";
-    let message_u8 = hexstr_to_vec(&hex::encode(message)).unwrap();
-    let msg_hash = hash_sha256(&message_u8);
+    if request.method.to_ascii_lowercase() == "post" {
+        status_code = 400;
 
-    let sig_info = sign_digest(&vec8_to_hexstr(&msg_hash), privkey_str).unwrap();
-    let result = vec8_to_hexstr(&sig_info.signature) + "\n";
+        let parse_res = &parse_request(&request);
+        match parse_res {
+            Ok(res) => {
+                let id = &res.id;
+                let method = &res.method;
+                let params = &res.params;
 
+                let privkey_str = &params[0];
+                let digest = &params[1];
+                if method.to_ascii_lowercase() == "sign_digest" {
+                    let sig_info = sign_digest(digest, privkey_str).unwrap();
+                    res_body = vec8_to_hexstr(&sig_info.signature);
+
+                    status_code = 200;
+                }
+            }
+            Err(e) => res_body = e.to_string(),
+        }
+    }
+
+    res_body += "\n";
     HttpResponse {
-        body: result.as_bytes().to_vec(),
+        body: res_body.as_bytes().to_vec(),
         headers: vec![],
-        status_code: success_code,
+        status_code,
         streaming_strategy: None,
         upgrade: Some(false),
+    }
+}
+
+fn parse_request(request: &HttpRequest) -> Result<JsonRPC, String> {
+    match request.body.clone() {
+        Some(body) => {
+            let body_str = String::from_utf8(body).unwrap();
+
+            let json_parsed = serde_json::from_str(&body_str);
+            match json_parsed {
+                Ok(res) => {
+                    return Ok(res);
+                }
+                Err(_) => return Err("Failed to parse request body".to_string()),
+            };
+        }
+        _ => return Err("Empty request body".to_string()),
     }
 }
 
@@ -114,8 +201,33 @@ fn sign(message: &str, privkey: impl PrivateKey) -> Result<Bundle, String> {
     }
 }
 
-#[ic_cdk_macros::query]
-fn test() -> Vec<u8> {
+#[test]
+fn test_parse_request() {
+    let body = Some(
+        r#"{
+        "id":"15",
+        "method":"sign_digest",
+        "params":[
+            "6a73b985cfd0142ba4be36d8fc0654836509b419ad241161cc40dff62025a81d",
+            "369183d3786773cef4e56c7b849e7ef5f742867510b676d6b38f8e38a222d8a2"
+        ]
+    }"#
+        .as_bytes()
+        .to_vec(),
+    );
+    let req = HttpRequest {
+        url: "/?canisterId=rrkah-fqaaa-aaaaa-aaaaq-cai".to_string(),
+        method: "POST".to_string(),
+        body: body,
+        headers: vec![],
+    };
+
+    let res = parse_request(&req).unwrap();
+    println!("id: {}", res.id);
+}
+
+#[test]
+fn test_sign() {
     let mut privkey_str = "6a73b985cfd0142ba4be36d8fc0654836509b419ad241161cc40dff62025a81d";
     let mut privkey = ECDSAPrivateKey::from_string(privkey_str).unwrap();
     println!("{}", privkey.to_string());
@@ -138,7 +250,7 @@ fn test() -> Vec<u8> {
     // let msg_hash =
     //     hexstr_to_vec("7d266152744bf8df4f7a2573d12856a635365fae4e74e19407fe3025a27a7733")?;
 
-    let message = "Hello world";
+    let message = "Hello world"; // 369183d3786773cef4e56c7b849e7ef5f742867510b676d6b38f8e38a222d8a2
     let message_u8 = hexstr_to_vec(&hex::encode(message)).unwrap();
     let msg_hash = hash_sha256(&message_u8);
     println!("msg_hash: {}", vec8_to_hexstr(&msg_hash));
@@ -148,6 +260,4 @@ fn test() -> Vec<u8> {
     let sig_info = sign(message, privkey).unwrap();
     println!("signature: {}", vec8_to_hexstr(&sig_info.signature));
     println!("pubkey: {}", vec8_to_hexstr(&sig_info.publickey));
-
-    sig_info.signature
 }

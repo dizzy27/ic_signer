@@ -16,8 +16,6 @@ type http_response = record {
 };
 
 service: {
-    test: () -> (blob) query;
-
     http_request : (record {
     url : text;
     method : text;
