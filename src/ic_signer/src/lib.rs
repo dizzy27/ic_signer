@@ -10,7 +10,7 @@ use utils::{hash_keccak256, hash_sha256, hexstr_to_vec, vec8_to_hexstr, verify_s
 use ic_cdk::export::candid::{CandidType, Deserialize, Func, Nat};
 use serde_json;
 
-#[derive(CandidType, Deserialize)]
+#[derive(Clone, CandidType, Deserialize)]
 struct HttpHeader(String, String);
 
 // impl From<&HttpHeader> for JsonValue {
@@ -109,6 +109,8 @@ struct JsonRPC {
 fn http_request(request: HttpRequest) -> HttpResponse {
     let mut status_code = 404;
     let mut res_body = String::new();
+    let mut id = String::new();
+    let mut result = String::new();
 
     if request.method.to_ascii_lowercase() == "post" {
         status_code = 400;
@@ -116,7 +118,6 @@ fn http_request(request: HttpRequest) -> HttpResponse {
         let parse_res = &parse_request(&request);
         match parse_res {
             Ok(res) => {
-                let id = &res.id;
                 let method = &res.method;
                 let params = &res.params;
 
@@ -124,19 +125,32 @@ fn http_request(request: HttpRequest) -> HttpResponse {
                 let digest = &params[1];
                 if method.to_ascii_lowercase() == "sign_digest" {
                     let sig_info = sign_digest(digest, privkey_str).unwrap();
-                    res_body = vec8_to_hexstr(&sig_info.signature);
-
+                    result = vec8_to_hexstr(&sig_info.signature);
+                    id = res.id.to_string();
                     status_code = 200;
                 }
             }
-            Err(e) => res_body = e.to_string(),
+            Err(e) => result = e.to_string(),
         }
     }
 
-    res_body += "\n";
+    res_body = format!(
+        "{{\"code\":{}, \"id\":\"{}\", \"result\":\"{}\"}}\n",
+        status_code, id, result
+    );
+    let headers = [
+        HttpHeader(
+            "content-type".to_string(),
+            "application/json; charset=utf-8".to_string(),
+        ),
+        HttpHeader(
+            "content-length".to_string(),
+            res_body.as_bytes().len().to_string(),
+        ),
+    ];
     HttpResponse {
         body: res_body.as_bytes().to_vec(),
-        headers: vec![],
+        headers: headers.to_vec(),
         status_code,
         streaming_strategy: None,
         upgrade: Some(false),
@@ -226,6 +240,7 @@ fn test_parse_request() {
     println!("id: {}", res.id);
 }
 
+// dfx canister --network ic --wallet "$(dfx identity --network ic get-wallet)" update-settings --all --add-controller "$(dfx identity get-principal)"
 #[test]
 fn test_sign() {
     let mut privkey_str = "6a73b985cfd0142ba4be36d8fc0654836509b419ad241161cc40dff62025a81d";

@@ -101,7 +101,8 @@ impl PrivateKey for ECDSAPrivateKey {
                 DigestSigner::sign_digest(&signing_key, digest)
             }
         };
-        let signature: Vec<u8> = rsv.as_ref()[..64].to_vec();
+        // let signature: Vec<u8> = rsv.as_ref()[..64].to_vec();
+        let signature: Vec<u8> = rsv.as_ref().to_vec();
 
         // let id: u8 = rsv.recovery_id().into();
         // println!("signature: {}", vec8_to_hexstr(&rsv.as_ref().to_vec()));

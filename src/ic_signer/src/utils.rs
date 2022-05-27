@@ -43,7 +43,9 @@ pub fn verify_signature(
     pubkey_bytes: &[u8],
 ) -> bool {
     // let message_hash = hash_keccak256(&message.to_vec());
-    let signature: Signature = signature::Signature::from_bytes(sig_bytes)
+    let mut sigbytes_64: [u8; 64] = [0; 64];
+    sigbytes_64.copy_from_slice(&sig_bytes[..64]);
+    let signature: Signature = signature::Signature::from_bytes(&sigbytes_64)
         .expect("Response is not a valid signature");
     let verifying_key = VerifyingKey::from_sec1_bytes(pubkey_bytes)
         .expect("Response is not a valid public key");
