@@ -2,7 +2,7 @@ use crate::crypto::Hash256;
 use crate::utils::{hexstr_to_vec, vec8_to_hexstr};
 use base64;
 use k256::ecdsa::{recoverable, signature::DigestSigner, SigningKey};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha3::{Keccak256, Sha3_256};
 
 const ECDSA_PRIVKEY_LEN: usize = 32;
@@ -35,7 +35,7 @@ pub trait PublicKey {
     fn len(&self) -> usize;
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct Bundle {
     pub digest: Vec<u8>,
     pub publickey: Vec<u8>,

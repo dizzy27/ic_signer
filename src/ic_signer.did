@@ -16,9 +16,11 @@ type http_response = record {
 };
 
 service: {
-    http_request : (record {
-    url : text;
-    method : text;
+  sign_digest_mpc: (text, text) -> (text) query;
+  sign_digest_ic: (text) -> (text);
+  http_request: (record {
+    url: text;
+    method: text;
     headers: vec http_header;
     body : opt blob;
   }) -> (http_response) query;

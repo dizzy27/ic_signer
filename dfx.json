@@ -4,6 +4,16 @@
             "type": "rust",
             "candid": "src/ic_signer.did",
             "package": "ic_signer"
+        },
+        "signer_assets": {
+            "frontend": {
+                "entrypoint": "src/signer_assets/index.html"
+            },
+            "source": [
+                "src/signer_assets/assets",
+                "dist/signer_assets/"
+            ],
+            "type": "assets"
         }
     },
     "defaults": {

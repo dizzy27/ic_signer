@@ -7,23 +7,16 @@ use utils::{hash_keccak256, hash_sha256, hexstr_to_vec, vec8_to_hexstr, verify_s
 // use k256::sha2::{Sha256, Sha512, Digest};
 
 // use ic_cdk::api::call::CallResult;
-use ic_cdk::export::candid::{CandidType, Deserialize, Func, Nat};
+use ic_cdk::export::{
+    candid::{CandidType, Deserialize, Func, Nat},
+    serde::{Deserialize as SerdeDeserialize, Serialize},
+    Principal,
+};
 use serde_json;
+use std::str::FromStr;
 
 #[derive(Clone, CandidType, Deserialize)]
 struct HttpHeader(String, String);
-
-// impl From<&HttpHeader> for JsonValue {
-//     fn from(header: &HttpHeader) -> Self {
-//         let mut json_obj = Object::new();
-
-//         let name = header.0.clone();
-//         let value = header.1.clone();
-//         json_obj.insert("name", JsonValue::String(name));
-//         json_obj.insert("value", JsonValue::String(value));
-//         JsonValue::Object(json_obj)
-//     }
-// }
 
 #[derive(Debug, Clone, CandidType, Deserialize)]
 struct Token {
@@ -64,33 +57,6 @@ struct HttpRequest {
     headers: Vec<HttpHeader>,
 }
 
-// impl From<&HttpRequest> for JsonValue {
-//     fn from(req: &HttpRequest) -> Self {
-//         let mut json_obj = Object::new();
-
-//         let url = req.url.clone();
-//         let method = req.method.clone();
-//         json_obj.insert("url", JsonValue::String(url));
-//         json_obj.insert("method", JsonValue::String(method));
-
-//         match req.body.clone() {
-//             Some(body) => {
-//                 let body_str = String::from_utf8(body).unwrap();
-//                 json_obj.insert("body", JsonValue::String(body_str));
-//             }
-//             _ => (),
-//         }
-
-//         let mut headers: Vec<JsonValue> = Vec::new();
-//         for header in &req.headers {
-//             let h = JsonValue::from(header);
-//             headers.push(h);
-//         }
-//         json_obj.insert("headers", JsonValue::Array(headers));
-//         JsonValue::Object(json_obj)
-//     }
-// }
-
 #[derive(serde::Deserialize)]
 struct JsonRPC {
     id: String,
@@ -98,11 +64,121 @@ struct JsonRPC {
     params: Vec<String>,
 }
 
-// #[derive(serde::Serialize)]
-// struct JsonRPCResponse {
-//     id: String,
-//     result: String,
-// }
+type CanisterId = Principal;
+
+#[derive(CandidType, Serialize, Debug)]
+struct ECDSAPublicKey {
+    pub canister_id: Option<CanisterId>,
+    pub derivation_path: Vec<Vec<u8>>,
+    pub key_id: EcdsaKeyId,
+}
+
+#[derive(CandidType, SerdeDeserialize, Debug)]
+struct ECDSAPublicKeyReply {
+    pub public_key: Vec<u8>,
+    pub chain_code: Vec<u8>,
+}
+
+#[derive(CandidType, Serialize, Debug)]
+struct SignWithECDSA {
+    pub message_hash: Vec<u8>,
+    pub derivation_path: Vec<Vec<u8>>,
+    pub key_id: EcdsaKeyId,
+}
+
+#[derive(CandidType, SerdeDeserialize, Debug)]
+struct SignWithECDSAReply {
+    pub signature: Vec<u8>,
+}
+
+#[derive(CandidType, Serialize, Debug, Clone)]
+struct EcdsaKeyId {
+    pub curve: EcdsaCurve,
+    pub name: String,
+}
+
+#[derive(CandidType, Serialize, Debug, Clone)]
+pub enum EcdsaCurve {
+    #[serde(rename = "secp256k1")]
+    Secp256k1,
+}
+
+#[ic_cdk_macros::update]
+pub async fn sign_digest_ic(digest: String) -> String {
+    let msg_hash = match hexstr_to_vec(&digest) {
+        Ok(hash) => hash,
+        Err(_) => {
+            return format!("{{\"result\":\"Sign failed when decoding digest\"}}\n").to_string()
+        }
+    };
+    assert!(msg_hash.len() == 32);
+
+    // let management_canister = ic_cdk::export::Principal::management_canister();
+    // let (rnd_buf,): (Vec<u8>,) = match ic_cdk::call(management_canister, "raw_rand", ()).await {
+    //     Ok(res) => res,
+    //     Err(_) => return "Sign failed when parsing request body".to_string(),
+    // };
+    let ic00_canister_id = "aaaaa-aa".to_string();
+    let ic00 = CanisterId::from_str(&ic00_canister_id).unwrap();
+    let key_id = EcdsaKeyId {
+        curve: EcdsaCurve::Secp256k1,
+        name: "".to_string(),
+    };
+    let pubkey: Vec<u8> = {
+        let request = ECDSAPublicKey {
+            canister_id: None,
+            derivation_path: vec![vec![2, 3]],
+            key_id: key_id.clone(),
+        };
+        ic_cdk::println!("Sending signature request = {:?}", request);
+        let (res,): (ECDSAPublicKeyReply,) = ic_cdk::call(ic00, "ecdsa_public_key", (request,))
+            .await
+            .map_err(|e| format!("Failed to call ecdsa_public_key {}", e.1))
+            .unwrap();
+        ic_cdk::println!("Got response = {:?}", res);
+        res.public_key
+    };
+
+    // let sig: Vec<u8> = {
+    //     let request = SignWithECDSA {
+    //         message_hash: msg_hash.clone(),
+    //         derivation_path: vec![vec![2, 3]],
+    //         key_id,
+    //     };
+    //     // ic_cdk::println!("Sending signature request = {:?}", request);
+    //     let (res,): (SignWithECDSAReply,) = ic_cdk::call(ic00, "sign_with_ecdsa", (request,))
+    //         .await
+    //         .map_err(|e| format!("Failed to call sign_with_ecdsa {}", e.1))
+    //         .unwrap();
+
+    //     // ic_cdk::println!("Got response = {:?}", res);
+    //     res.signature
+    // };
+
+    // let verified = verify_signature(&msg_hash, &sig, &pubkey);
+    // if verified {
+    //     let res = Bundle {
+    //         digest: msg_hash,
+    //         publickey: pubkey,
+    //         signature: sig,
+    //     };
+    //     "hahaha".to_string()
+    //     // return serde_json::to_string(&res).unwrap();
+    // } else {
+    //     return format!("{{\"result\":\"Sign failed, signature verified failed\"}}\n").to_string();
+    // }
+
+    "hahaha".to_string()
+}
+
+#[ic_cdk_macros::query]
+pub fn sign_digest_mpc(digest: String, private_key: String) -> String {
+    let res = sign_digest(&digest, &private_key);
+    match res {
+        Ok(res) => serde_json::to_string(&res).unwrap(),
+        Err(err) => format!("{{\"result\":\"{}\"}}\n", err).to_string()
+    }
+}
 
 // curl http://localhost:8000/?canisterId=rrkah-fqaaa-aaaaa-aaaaq-cai
 #[ic_cdk_macros::query]

@@ -11,8 +11,10 @@
 .dfx/
 
 # frontend code
+package-lock.json
 node_modules/
 dist/
+src/declarations/
 
 # rust
 Cargo.lock
