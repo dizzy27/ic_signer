@@ -7,13 +7,16 @@ use utils::{hash_keccak256, hash_sha256, hexstr_to_vec, vec8_to_hexstr, verify_s
 // use k256::sha2::{Sha256, Sha512, Digest};
 
 // use ic_cdk::api::call::CallResult;
-use ic_cdk::export::{
-    candid::{CandidType, Deserialize, Func, Nat},
-    serde::{Deserialize as SerdeDeserialize, Serialize},
-    Principal,
+use ic_cdk::{
+    api,
+    export::{
+        candid::{CandidType, Deserialize, Func, Nat},
+        serde::{Deserialize as SerdeDeserialize, Serialize},
+        Principal,
+    },
 };
 use serde_json;
-use std::str::FromStr;
+use std::{cell::RefCell, collections::BTreeMap, mem};
 
 #[derive(Clone, CandidType, Deserialize)]
 struct HttpHeader(String, String);
@@ -62,122 +65,6 @@ struct JsonRPC {
     id: String,
     method: String,
     params: Vec<String>,
-}
-
-type CanisterId = Principal;
-
-#[derive(CandidType, Serialize, Debug)]
-struct ECDSAPublicKey {
-    pub canister_id: Option<CanisterId>,
-    pub derivation_path: Vec<Vec<u8>>,
-    pub key_id: EcdsaKeyId,
-}
-
-#[derive(CandidType, SerdeDeserialize, Debug)]
-struct ECDSAPublicKeyReply {
-    pub public_key: Vec<u8>,
-    pub chain_code: Vec<u8>,
-}
-
-#[derive(CandidType, Serialize, Debug)]
-struct SignWithECDSA {
-    pub message_hash: Vec<u8>,
-    pub derivation_path: Vec<Vec<u8>>,
-    pub key_id: EcdsaKeyId,
-}
-
-#[derive(CandidType, SerdeDeserialize, Debug)]
-struct SignWithECDSAReply {
-    pub signature: Vec<u8>,
-}
-
-#[derive(CandidType, Serialize, Debug, Clone)]
-struct EcdsaKeyId {
-    pub curve: EcdsaCurve,
-    pub name: String,
-}
-
-#[derive(CandidType, Serialize, Debug, Clone)]
-pub enum EcdsaCurve {
-    #[serde(rename = "secp256k1")]
-    Secp256k1,
-}
-
-#[ic_cdk_macros::update]
-pub async fn sign_digest_ic(digest: String) -> String {
-    let msg_hash = match hexstr_to_vec(&digest) {
-        Ok(hash) => hash,
-        Err(_) => {
-            return format!("{{\"result\":\"Sign failed when decoding digest\"}}\n").to_string()
-        }
-    };
-    assert!(msg_hash.len() == 32);
-
-    // let management_canister = ic_cdk::export::Principal::management_canister();
-    // let (rnd_buf,): (Vec<u8>,) = match ic_cdk::call(management_canister, "raw_rand", ()).await {
-    //     Ok(res) => res,
-    //     Err(_) => return "Sign failed when parsing request body".to_string(),
-    // };
-    let ic00_canister_id = "aaaaa-aa".to_string();
-    let ic00 = CanisterId::from_str(&ic00_canister_id).unwrap();
-    let key_id = EcdsaKeyId {
-        curve: EcdsaCurve::Secp256k1,
-        name: "".to_string(),
-    };
-    let pubkey: Vec<u8> = {
-        let request = ECDSAPublicKey {
-            canister_id: None,
-            derivation_path: vec![vec![2, 3]],
-            key_id: key_id.clone(),
-        };
-        ic_cdk::println!("Sending signature request = {:?}", request);
-        let (res,): (ECDSAPublicKeyReply,) = ic_cdk::call(ic00, "ecdsa_public_key", (request,))
-            .await
-            .map_err(|e| format!("Failed to call ecdsa_public_key {}", e.1))
-            .unwrap();
-        ic_cdk::println!("Got response = {:?}", res);
-        res.public_key
-    };
-
-    // let sig: Vec<u8> = {
-    //     let request = SignWithECDSA {
-    //         message_hash: msg_hash.clone(),
-    //         derivation_path: vec![vec![2, 3]],
-    //         key_id,
-    //     };
-    //     // ic_cdk::println!("Sending signature request = {:?}", request);
-    //     let (res,): (SignWithECDSAReply,) = ic_cdk::call(ic00, "sign_with_ecdsa", (request,))
-    //         .await
-    //         .map_err(|e| format!("Failed to call sign_with_ecdsa {}", e.1))
-    //         .unwrap();
-
-    //     // ic_cdk::println!("Got response = {:?}", res);
-    //     res.signature
-    // };
-
-    // let verified = verify_signature(&msg_hash, &sig, &pubkey);
-    // if verified {
-    //     let res = Bundle {
-    //         digest: msg_hash,
-    //         publickey: pubkey,
-    //         signature: sig,
-    //     };
-    //     "hahaha".to_string()
-    //     // return serde_json::to_string(&res).unwrap();
-    // } else {
-    //     return format!("{{\"result\":\"Sign failed, signature verified failed\"}}\n").to_string();
-    // }
-
-    "hahaha".to_string()
-}
-
-#[ic_cdk_macros::query]
-pub fn sign_digest_mpc(digest: String, private_key: String) -> String {
-    let res = sign_digest(&digest, &private_key);
-    match res {
-        Ok(res) => serde_json::to_string(&res).unwrap(),
-        Err(err) => format!("{{\"result\":\"{}\"}}\n", err).to_string()
-    }
 }
 
 // curl http://localhost:8000/?canisterId=rrkah-fqaaa-aaaaa-aaaaq-cai
@@ -250,6 +137,75 @@ fn parse_request(request: &HttpRequest) -> Result<JsonRPC, String> {
     }
 }
 
+#[derive(CandidType, Deserialize, Default)]
+struct State {
+    privkeys: BTreeMap<Principal, BTreeMap<String, String>>,
+}
+
+thread_local! {
+    // static RSA_KEYS: RefCell<BTreeMap<& 'static u64, >>
+    static STATE: RefCell<State> = RefCell::default();
+}
+
+impl State {
+    pub fn get_privkey(principal: &Principal, key_id: &str) -> Result<String, String> {
+        let state = STATE.with(|s| mem::take(&mut *s.borrow_mut()));
+        match state.privkeys.get(principal) {
+            Some(pk_map) => match pk_map.get(key_id) {
+                Some(pk) => Ok(pk.clone()),
+                None => Err("Key ID not found".to_string()),
+            },
+            None => Err("Principal not found".to_string()),
+        }
+        // "6a73b985cfd0142ba4be36d8fc0654836509b419ad241161cc40dff62025a81d".to_string()
+    }
+
+    pub fn set_privkey(principal: &Principal, key_id: &str, key: &str) -> Result<(), String> {
+        let state = STATE.with(|s| mem::take(&mut *s.borrow_mut()));
+        let mut privkeys = state.privkeys;
+        match privkeys.get(principal) {
+            Some(pk_map) => match pk_map.get(key_id) {
+                Some(_) => return Err("This key ID is already exist".to_string()),
+                None => {
+                    let mut new_pk_map = pk_map.clone();
+                    new_pk_map.insert(String::from(key_id), String::from(key));
+                    privkeys.insert(*principal, new_pk_map);
+                }
+            },
+            None => {
+                let mut new_pk_map = BTreeMap::new();
+                new_pk_map.insert(String::from(key_id), String::from(key));
+                privkeys.insert(*principal, new_pk_map);
+            }
+        };
+        STATE.with(|s| *s.borrow_mut() = State { privkeys });
+        Ok(())
+    }
+}
+
+#[ic_cdk_macros::update]
+fn upload_privkey(key_id: String, key: String) -> String {
+    let caller = api::caller();
+    State::set_privkey(&caller, &key_id, &key).unwrap();
+    vec8_to_hexstr(&caller.as_ref().to_vec())
+}
+
+#[ic_cdk_macros::query]
+fn show_privkey(key_id: String) -> String {
+    let caller = api::caller();
+    let key = State::get_privkey(&caller, &key_id).unwrap();
+    key
+}
+
+#[ic_cdk_macros::query]
+fn sign_digest_mpc(digest: String, key_id: String) -> String {
+    let res = sign_digest(&digest, &key_id);
+    match res {
+        Ok(res) => serde_json::to_string(&res).unwrap(),
+        Err(err) => format!("{{\"result\":\"{}\"}}\n", err).to_string(),
+    }
+}
+
 fn sign_digest(digest: &str, private_key: &str) -> Result<Bundle, String> {
     let privkey = ECDSAPrivateKey::from_string(private_key)?;
     let hash_algo = HashAlgorithm::Keccak256;
@@ -271,23 +227,108 @@ fn sign_digest(digest: &str, private_key: &str) -> Result<Bundle, String> {
     }
 }
 
-fn sign(message: &str, privkey: impl PrivateKey) -> Result<Bundle, String> {
-    let hash_algo = HashAlgorithm::Keccak256;
-    let message_u8 = hexstr_to_vec(&hex::encode(message))?;
-    let msg_hash = hash_keccak256(&message_u8);
+type CanisterId = Principal;
 
-    let sig = privkey.sign(&msg_hash, hash_algo)?;
-    let pubkey = privkey.to_pubkey()?;
+#[derive(CandidType, Serialize, Debug)]
+struct ECDSAPublicKey {
+    pub canister_id: Option<CanisterId>,
+    pub derivation_path: Vec<Vec<u8>>,
+    pub key_id: EcdsaKeyId,
+}
 
-    let verified = verify_signature(&msg_hash, &sig, &pubkey);
+#[derive(CandidType, SerdeDeserialize, Debug)]
+struct ECDSAPublicKeyReply {
+    pub public_key: Vec<u8>,
+    pub chain_code: Vec<u8>,
+}
+
+#[derive(CandidType, Serialize, Debug)]
+struct SignWithECDSA {
+    pub message_hash: Vec<u8>,
+    pub derivation_path: Vec<Vec<u8>>,
+    pub key_id: EcdsaKeyId,
+}
+
+#[derive(CandidType, SerdeDeserialize, Debug)]
+struct SignWithECDSAReply {
+    pub signature: Vec<u8>,
+}
+
+#[derive(CandidType, Serialize, Debug, Clone)]
+struct EcdsaKeyId {
+    pub curve: EcdsaCurve,
+    pub name: String,
+}
+
+#[derive(CandidType, Serialize, Debug, Clone)]
+pub enum EcdsaCurve {
+    #[serde(rename = "secp256k1")]
+    Secp256k1,
+}
+
+#[ic_cdk_macros::update]
+async fn sign_digest_ic(digest: String) -> String {
+    let msg_hash = match hexstr_to_vec(&digest) {
+        Ok(hash) => hash,
+        Err(_) => {
+            return format!("{{\"result\":\"Sign failed when decoding digest\"}}\n").to_string()
+        }
+    };
+    assert!(msg_hash.len() == 32);
+
+    let ic00 = ic_cdk::export::Principal::management_canister();
+    // let (rnd_buf,): (Vec<u8>,) = match ic_cdk::call(ic00, "raw_rand", ()).await {
+    //     Ok(res) => res,
+    //     Err(_) => return "Sign failed when parsing request body".to_string(),
+    // };
+    // return vec8_to_hexstr(&rnd_buf);
+    // let ic00_canister_id = "aaaaa-aa".to_string();
+    let key_id = EcdsaKeyId {
+        curve: EcdsaCurve::Secp256k1,
+        name: "".to_string(),
+    };
+    // let this_canister_id = "ptf43-biaaa-aaaai-ack3q-cai".to_string();
+    // let this_canister = CanisterId::from_str(&this_canister_id).unwrap();
+    // let pubkey: Vec<u8> = {
+    //     let request = ECDSAPublicKey {
+    //         canister_id: None, // Some(this_canister),
+    //         derivation_path: vec![vec![2, 3]],
+    //         key_id: key_id.clone(),
+    //     };
+    //     // ic_cdk::println!("Sending signature request = {:?}", request);
+    //     let (res,): (ECDSAPublicKeyReply,) = ic_cdk::call(ic00, "ecdsa_public_key", (request,))
+    //         .await
+    //         .map_err(|e| format!("Failed to call ecdsa_public_key: {}", e.1))
+    //         .unwrap();
+    //     // ic_cdk::println!("Got response = {:?}", res);
+    //     res.public_key
+    // };
+
+    let sig: Vec<u8> = {
+        let request = SignWithECDSA {
+            message_hash: msg_hash.clone(),
+            derivation_path: vec![vec![2, 3]],
+            key_id,
+        };
+        // ic_cdk::println!("Sending signature request = {:?}", request);
+        let (res,): (SignWithECDSAReply,) = ic_cdk::call(ic00, "sign_with_ecdsa", (request,))
+            .await
+            .map_err(|e| format!("Failed to call sign_with_ecdsa {}", e.1))
+            .unwrap();
+        // ic_cdk::println!("Got response = {:?}", res);
+        res.signature
+    };
+
+    let verified = true; // verify_signature(&msg_hash, &sig, &pubkey);
     if verified {
-        Ok(Bundle {
+        let res = Bundle {
             digest: msg_hash,
-            publickey: pubkey,
+            publickey: Vec::new(), // pubkey,
             signature: sig,
-        })
+        };
+        return serde_json::to_string(&res).unwrap();
     } else {
-        return Err("Signature verified failed".to_string());
+        return format!("{{\"result\":\"Sign failed, signature verified failed\"}}\n").to_string();
     }
 }
 
@@ -348,7 +389,7 @@ fn test_sign() {
     let msg_hash = hash_keccak256(&message_u8);
     println!("msg_hash: {}", vec8_to_hexstr(&msg_hash));
 
-    let sig_info = sign(message, privkey).unwrap();
+    let sig_info = sign_digest(message, &privkey.to_string()).unwrap();
     println!("signature: {}", vec8_to_hexstr(&sig_info.signature));
     println!("pubkey: {}", vec8_to_hexstr(&sig_info.publickey));
 }

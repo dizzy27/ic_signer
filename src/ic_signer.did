@@ -16,6 +16,8 @@ type http_response = record {
 };
 
 service: {
+  upload_privkey: (text, text) -> (text);
+  show_privkey: (text) -> (text);
   sign_digest_mpc: (text, text) -> (text) query;
   sign_digest_ic: (text) -> (text);
   http_request: (record {

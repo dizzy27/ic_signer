@@ -35,12 +35,20 @@
 
     <el-row class="row-btn" justify="start" :gutter="24">
       <el-col :offset="5" :span="7"
-        ><el-button class="ic-sign-btn" type="primary" :disabled="!param.logedIn" @click="signByIC"
+        ><el-button
+          class="ic-sign-btn"
+          type="primary"
+          :disabled="!param.logedIn || param.signing"
+          @click="signByIC"
           >IC ECDSA SIGN</el-button
         ></el-col
       >
       <el-col :offset="0" :span="7"
-        ><el-button class="sign-btn" type="primary" :disabled="!param.logedIn" @click="openSignBox"
+        ><el-button
+          class="sign-btn"
+          type="primary"
+          :disabled="!param.logedIn || param.signing"
+          @click="openSignBox"
           >ECDSA SIGN</el-button
         ></el-col
       >
@@ -96,6 +104,7 @@ export default {
         digest: "",
         actor: undefined,
         principalId: "",
+        signing: false,
         result: "",
       },
     };
@@ -117,7 +126,7 @@ export default {
         handleAuthenticated(authClient);
       }
     },
-    async handleLoginSuccess(identity) {
+    handleLoginSuccess(identity) {
       this.param.logedIn = true;
       this.param.principal = identity;
 
@@ -137,8 +146,8 @@ ${pricipal.toString()}`;
         },
         identityProvider:
           process.env.NODE_ENV === "production" ? 
-          "https://identity.ic0.app/#authorize" :
-          process.env.LOCAL_II_CANISTER,
+            "https://identity.ic0.app/#authorize" :
+            process.env.LOCAL_II_CANISTER,
         // Maximum authorization expiration is 8 days
         maxTimeToLive: days * hours * nanoseconds,
       });
@@ -146,14 +155,22 @@ ${pricipal.toString()}`;
     manageApiKey() {
       this.setResultText("WIP ...", true);
     },
+    checkDigest() {
+      return /^[0-9a-fA-F]{64}$/.test(this.param.digest);
+    },
     async openSignBox() {
+      if (!this.checkDigest(this.param.digest)) {
+        this.setResultText("Invalid Digest Input", true);
+        return;
+      }
+
       let result;
       const prompt = `Enter the Key ID`
       try {
         result = await ElMessageBox.prompt(prompt, "Key ID", {
           confirmButtonText: "Confirm",
           cancelButtonText: "Cancel",
-          customClass: "key-id-box",
+          // customClass: "key-id-box",
           // inputPattern:
           //   /(ht|f)tp(s?)\:\/\/[0-9a-zA-Z]([-.\w]*[0-9a-zA-Z])*(:(0-9)*)*(\/?)([a-zA-Z0-9\-\.\?\,\'\/\\\+&amp;%$#_]*)?/,
           inputErrorMessage: "Invalid Key ID",
@@ -172,19 +189,38 @@ ${pricipal.toString()}`;
       await this.sign(result.value);
     },
     async sign(keyId) {
-      let res = await this.param.actor.sign_digest_mpc(this.param.digest, keyId);
+      if (!this.checkDigest(this.param.digest)) {
+        this.setResultText("Invalid Digest Input", true);
+        return;
+      }
+
+      this.setResultText("Signing ...", true);
+      this.param.signing = true;
+      try {
+        let res = await this.param.actor.sign_digest_mpc(this.param.digest, keyId);
       
-      let sig = JSON.parse(res);
-      sig.digest = Buffer.from(sig.digest).toString("hex");
-      sig.signature = Buffer.from(sig.signature).toString("hex");
-      sig.publickey = Buffer.from(sig.publickey).toString("hex");
-      this.setResultText(sig);
+        let sig = JSON.parse(res);
+        sig.digest = Buffer.from(sig.digest).toString("hex");
+        sig.signature = Buffer.from(sig.signature).toString("hex");
+        sig.publickey = Buffer.from(sig.publickey).toString("hex");
+        this.setResultText(sig);
+      } catch (err) {
+        const error = "Failed to call sign_digest_mpc: \n" + err;
+        this.setResultText(error, true);
+      }
+      this.param.signing = false;
     },
     async signByIC() {
-      this.setResultText("WIP ...", true);
-      // this.setResultText("Signing By IC ...", true);
-      // const res = await this.param.actor.sign_digest_ic("369183d3786773cef4e56c7b849e7ef5f742867510b676d6b38f8e38a222d8a2");
-      // this.setResultText(res);
+      this.setResultText("Signing By IC ...", true);
+      this.param.signing = true;
+      try {
+        let res = await this.param.actor.sign_digest_ic(this.param.digest);
+        this.setResultText(res);
+      } catch (err) {
+        const error = "Failed to call sign_digest_ic: \n" + err;
+        this.setResultText(error, true);
+      }
+      this.param.signing = false;
     },
     setResultText(message, text) {
       this.param.result = text ? message : JSON.stringify(message, null, 2);
