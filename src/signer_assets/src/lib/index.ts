@@ -1,6 +1,6 @@
 import { AuthClient } from "@dfinity/auth-client";
 import { Actor, Identity, HttpAgent } from "@dfinity/agent";
-// import { canisterId, createActor } from "../../../declarations/signer";
+// import { canisterId, createActor } from "../../../declarations/ic_signer";
 import { idlFactory } from "./signer.did.js";
 
 const backend = process.env.IC_SIGNER_CANISTER_ID;

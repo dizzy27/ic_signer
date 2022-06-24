@@ -15,9 +15,11 @@ type http_response = record {
   upgrade: opt bool;
 };
 
+type privkey_gen_res = record { text; text };
+
 service: {
-  upload_privkey: (text, text) -> (text);
-  show_privkey: (text) -> (text);
+  generate_apikey: () -> (text);
+  generate_privkey: () -> (privkey_gen_res);
   sign_digest_mpc: (text, text) -> (text) query;
   sign_digest_ic: (text) -> (text);
   http_request: (record {

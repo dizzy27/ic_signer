@@ -2,10 +2,35 @@ use crate::crypto::Hash256;
 use crate::utils::{hexstr_to_vec, vec8_to_hexstr};
 use base64;
 use k256::ecdsa::{recoverable, signature::DigestSigner, SigningKey};
+use rand_core::{CryptoRng, Error, RngCore};
 use serde::{Deserialize, Serialize};
 use sha3::{Keccak256, Sha3_256};
 
 const ECDSA_PRIVKEY_LEN: usize = 32;
+
+pub struct OsRng<'a> {
+    rnd: &'a str,
+}
+
+impl CryptoRng for OsRng<'_> {}
+
+impl RngCore for OsRng<'_> {
+    fn next_u32(&mut self) -> u32 {
+        todo!()
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        todo!()
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        hex::decode_to_slice(self.rnd, dest).unwrap()
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+        todo!()
+    }
+}
 
 #[derive(Copy, Clone)]
 pub enum HashAlgorithm {
@@ -48,6 +73,12 @@ pub struct ECDSAPrivateKey {
 }
 
 impl ECDSAPrivateKey {
+    pub fn generate(rnd: &str) -> ECDSAPrivateKey {
+        let key = SigningKey::random(&mut OsRng { rnd });
+        let data = key.to_bytes().to_vec();
+        ECDSAPrivateKey { data }
+    }
+
     pub fn from_string(hex_string: &str) -> Result<ECDSAPrivateKey, String> {
         if hex_string.len() != ECDSA_PRIVKEY_LEN * 2 {
             return Err("ECDSA private key string's length error".to_string());

@@ -14,9 +14,25 @@ use ic_cdk::{
         serde::{Deserialize as SerdeDeserialize, Serialize},
         Principal,
     },
+    storage,
 };
 use serde_json;
 use std::{cell::RefCell, collections::BTreeMap, mem};
+// use ic_certified_map::Hash;
+
+// #[derive(CandidType, Deserialize)]
+// struct StableState {
+//     state: State,
+//     // hashes: Vec<(String, Hash)>,
+// }
+
+// #[ic_cdk_macros::pre_upgrade]
+// fn pre_upgrade() {
+//     let state = STATE.with(|state| mem::take(&mut *state.borrow_mut()));
+//     // let hashes =
+//     let stable_state = StableState { state };
+//     storage::stable_save((stable_state,)).unwrap();
+// }
 
 #[derive(Clone, CandidType, Deserialize)]
 struct HttpHeader(String, String);
@@ -77,6 +93,15 @@ fn http_request(request: HttpRequest) -> HttpResponse {
 
     if request.method.to_ascii_lowercase() == "post" {
         status_code = 400;
+        let get_privkey = |params: &Vec<String>| {
+            if params.len() > 2 {
+                let api_key = &params[2];
+                let caller = State::get_caller_by_apikey(api_key).unwrap();
+                State::get_privkey(&caller, &params[0]).unwrap()
+            } else {
+                params[0].clone()
+            }
+        };
 
         let parse_res = &parse_request(&request);
         match parse_res {
@@ -84,10 +109,11 @@ fn http_request(request: HttpRequest) -> HttpResponse {
                 let method = &res.method;
                 let params = &res.params;
 
-                let privkey_str = &params[0];
+                let privkey = &get_privkey(params);
                 let digest = &params[1];
+
                 if method.to_ascii_lowercase() == "sign_digest" {
-                    let sig_info = sign_digest(digest, privkey_str).unwrap();
+                    let sig_info = sign_digest(digest, &privkey).unwrap();
                     result = vec8_to_hexstr(&sig_info.signature);
                     id = res.id.to_string();
                     status_code = 200;
@@ -140,66 +166,162 @@ fn parse_request(request: &HttpRequest) -> Result<JsonRPC, String> {
 #[derive(CandidType, Deserialize, Default)]
 struct State {
     privkeys: BTreeMap<Principal, BTreeMap<String, String>>,
+    apiKeys: BTreeMap<Principal, String>,
 }
 
 thread_local! {
-    // static RSA_KEYS: RefCell<BTreeMap<& 'static u64, >>
     static STATE: RefCell<State> = RefCell::default();
 }
 
 impl State {
-    pub fn get_privkey(principal: &Principal, key_id: &str) -> Result<String, String> {
-        let state = STATE.with(|s| mem::take(&mut *s.borrow_mut()));
-        match state.privkeys.get(principal) {
-            Some(pk_map) => match pk_map.get(key_id) {
-                Some(pk) => Ok(pk.clone()),
-                None => Err("Key ID not found".to_string()),
-            },
-            None => Err("Principal not found".to_string()),
-        }
-        // "6a73b985cfd0142ba4be36d8fc0654836509b419ad241161cc40dff62025a81d".to_string()
+    pub fn get_apikey(principal: &Principal) -> Result<String, String> {
+        STATE.with(|state| {
+            let state = state.borrow();
+            match state.apiKeys.get(principal) {
+                Some(api_key) => Ok(api_key.clone()),
+                None => Err(" API key not found".to_string()),
+            }
+        })
     }
 
-    pub fn set_privkey(principal: &Principal, key_id: &str, key: &str) -> Result<(), String> {
-        let state = STATE.with(|s| mem::take(&mut *s.borrow_mut()));
-        let mut privkeys = state.privkeys;
-        match privkeys.get(principal) {
-            Some(pk_map) => match pk_map.get(key_id) {
-                Some(_) => return Err("This key ID is already exist".to_string()),
-                None => {
-                    let mut new_pk_map = pk_map.clone();
-                    new_pk_map.insert(String::from(key_id), String::from(key));
-                    privkeys.insert(*principal, new_pk_map);
-                }
-            },
-            None => {
-                let mut new_pk_map = BTreeMap::new();
-                new_pk_map.insert(String::from(key_id), String::from(key));
-                privkeys.insert(*principal, new_pk_map);
+    pub fn get_caller_by_apikey(apikey: &String) -> Option<Principal> {
+        STATE.with(|state| {
+            let state = state.borrow();
+            for (k, v) in &state.apiKeys {
+                if *v == *apikey { return Some(*k); }
             }
-        };
-        STATE.with(|s| *s.borrow_mut() = State { privkeys });
-        Ok(())
+            None
+        })
+    }
+
+    pub fn set_apikey(principal: &Principal, key: &String) {
+        STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            let _ = state.apiKeys.insert(*principal, key.clone());
+        })
+    }
+
+    pub fn next_key_id(principal: &Principal) -> String {
+        STATE.with(|state| {
+            let state = state.borrow();
+            match state.privkeys.get(principal) {
+                Some(pk_map) => pk_map.len().to_string(),
+                None => String::from("0"),
+            }
+        })
+    }
+
+    pub fn get_privkey(principal: &Principal, key_id: &str) -> Result<String, String> {
+        STATE.with(|state| {
+            let state = state.borrow();
+            match state.privkeys.get(principal) {
+                Some(pk_map) => match pk_map.get(key_id) {
+                    Some(pk) => Ok(pk.clone()),
+                    None => Err("Key ID not found".to_string()),
+                },
+                None => Err("Principal not found".to_string()),
+            }
+        })
+    }
+
+    pub fn set_privkey(principal: &Principal, key_id: &String, key: &String) -> Result<(), String> {
+        STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            match state.privkeys.get_mut(principal) {
+                Some(pk_map) => match pk_map.get(key_id) {
+                    Some(_) => return Err("This key ID is already exist".to_string()),
+                    None => {
+                        let _ = pk_map.insert(key_id.clone(), key.clone());
+                        return Ok(());
+                    }
+                },
+                None => {
+                    let mut new_pk_map = BTreeMap::new();
+                    new_pk_map.insert(String::from(key_id), String::from(key));
+                    state.privkeys.insert(*principal, new_pk_map);
+                    return Ok(());
+                }
+            };
+        })
     }
 }
 
 #[ic_cdk_macros::update]
-fn upload_privkey(key_id: String, key: String) -> String {
+async fn generate_apikey() -> String {
     let caller = api::caller();
-    State::set_privkey(&caller, &key_id, &key).unwrap();
-    vec8_to_hexstr(&caller.as_ref().to_vec())
+    let random = match get_random().await {
+        Ok(rnd) => rnd,
+        Err(e) => return format!("Failed to generate a new key: {}", e),
+    };
+    State::set_apikey(&caller, &random);
+    random
 }
 
-#[ic_cdk_macros::query]
-fn show_privkey(key_id: String) -> String {
+#[derive(Clone, CandidType, Deserialize)]
+struct PrivkeyGenRes(String, String);
+
+#[ic_cdk_macros::update]
+async fn generate_privkey() -> PrivkeyGenRes {
     let caller = api::caller();
-    let key = State::get_privkey(&caller, &key_id).unwrap();
-    key
+    let key_id = State::next_key_id(&caller);
+    let random = match get_random().await {
+        Ok(rnd) => rnd,
+        Err(e) => {
+            return PrivkeyGenRes(
+                format!("Failed to generate a new key: {}", e),
+                String::from(""),
+            )
+        }
+    };
+    let key = ECDSAPrivateKey::generate(&random);
+    let id = match State::set_privkey(&caller, &key_id, &key.to_string()) {
+        Ok(_) => key_id,
+        Err(e) => {
+            return PrivkeyGenRes(
+                format!("Failed to generate a new key: {}", e),
+                String::from(""),
+            )
+        }
+    };
+    let pubkey = key.to_pubkey().unwrap();
+    PrivkeyGenRes(id, vec8_to_hexstr(&pubkey))
 }
+
+async fn get_random() -> Result<String, String> {
+    let ic00 = ic_cdk::export::Principal::management_canister();
+    let (rnd_buf,): (Vec<u8>,) = match ic_cdk::call(ic00, "raw_rand", ()).await {
+        Ok(res) => res,
+        Err(e) => return Err(format!("Failed to get random: {:?}", e)),
+    };
+    Ok(vec8_to_hexstr(&rnd_buf))
+}
+
+// #[ic_cdk_macros::update]
+// fn upload_privkey(key_id: String, key: String) -> String {
+//     let caller = api::caller();
+//     State::set_privkey(&caller, &key_id, &key).unwrap();
+//     vec8_to_hexstr(&caller.as_ref().to_vec())
+// }
+
+// #[ic_cdk_macros::query]
+// fn show_privkey(key_id: String) -> String {
+//     let caller = api::caller();
+//     let key = State::get_privkey(&caller, &key_id).unwrap();
+//     key
+// }
+
+// #[ic_cdk_macros::query]
+// fn show_apikey() -> String {
+//     let caller = api::caller();
+//     let key = State::get_apikey(&caller).unwrap();
+//     key
+// }
 
 #[ic_cdk_macros::query]
 fn sign_digest_mpc(digest: String, key_id: String) -> String {
-    let res = sign_digest(&digest, &key_id);
+    let caller = api::caller();
+    let key = State::get_privkey(&caller, &key_id).unwrap();
+    let res = sign_digest(&digest, &key);
     match res {
         Ok(res) => serde_json::to_string(&res).unwrap(),
         Err(err) => format!("{{\"result\":\"{}\"}}\n", err).to_string(),
@@ -340,7 +462,8 @@ fn test_parse_request() {
         "method":"sign_digest",
         "params":[
             "6a73b985cfd0142ba4be36d8fc0654836509b419ad241161cc40dff62025a81d",
-            "369183d3786773cef4e56c7b849e7ef5f742867510b676d6b38f8e38a222d8a2"
+            "369183d3786773cef4e56c7b849e7ef5f742867510b676d6b38f8e38a222d8a2",
+            "6c9e1c6907e0173d9b59ab4cc2fda96283f83411b08798ae8d824969abcb8d56"
         ]
     }"#
         .as_bytes()
@@ -354,7 +477,7 @@ fn test_parse_request() {
     };
 
     let res = parse_request(&req).unwrap();
-    println!("id: {}", res.id);
+    println!("params: {:?}", res.params);
 }
 
 // dfx canister --network ic --wallet "$(dfx identity --network ic get-wallet)" update-settings --all --add-controller "$(dfx identity get-principal)"

@@ -18,7 +18,13 @@
 
     <el-row class="row-btn" justify="center">
       <el-button class="manage-api-key" type="primary" :disabled="!param.logedIn" @click="manageApiKey"
-        >MANAGE API KEY</el-button
+        >GENERATE API KEY</el-button
+      >
+    </el-row>
+
+    <el-row class="row-btn" justify="center">
+      <el-button class="gen-private-key" type="primary" :disabled="!param.logedIn" @click="genPrivkey"
+        >GENERATE PRIVATE KEY</el-button
       >
     </el-row>
 
@@ -152,8 +158,33 @@ ${pricipal.toString()}`;
         maxTimeToLive: days * hours * nanoseconds,
       });
     },
-    manageApiKey() {
-      this.setResultText("WIP ...", true);
+    async manageApiKey() {
+      this.setResultText("Generating API Key ...", true);
+      try {
+        let res = await this.param.actor.generate_apikey();
+        this.setResultText(`API key generated: ${res}`, true);
+      } catch (err) {
+        const error = "Failed to generate a API key: \n" + err;
+        this.setResultText(error, true);
+      }
+    },
+    async genPrivkey() {
+      this.setResultText("Generating Private Key ...", true);
+      try {
+        let res = await this.param.actor.generate_privkey();
+        let genRes = {};
+        if (res[1] !== "") {
+          genRes.keyId = res[0];
+          genRes.publickey = res[1];
+          this.setResultText(genRes);
+        } else {
+          const error = "Failed to generate a private key: \n" + res[0];
+          this.setResultText(error, true);
+        }
+      } catch (err) {
+        const error = "Failed to generate a private key: \n" + err;
+        this.setResultText(error, true);
+      }
     },
     checkDigest() {
       return /^[0-9a-fA-F]{64}$/.test(this.param.digest);
@@ -205,7 +236,7 @@ ${pricipal.toString()}`;
         sig.publickey = Buffer.from(sig.publickey).toString("hex");
         this.setResultText(sig);
       } catch (err) {
-        const error = "Failed to call sign_digest_mpc: \n" + err;
+        const error = "Failed to sign: \n" + err;
         this.setResultText(error, true);
       }
       this.param.signing = false;
@@ -253,6 +284,10 @@ ${pricipal.toString()}`;
 }
 
 .manage-api-key {
+  width: 57.64%;
+}
+
+.gen-private-key {
   width: 57.64%;
 }
 
