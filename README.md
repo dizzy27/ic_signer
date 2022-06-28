@@ -3,7 +3,7 @@ To sign a message with the keys stored in the Internet Computer.
 
 ## Running the project locally
 
-If you want to test your project locally, you can use the following commands:
+If you want to test the project locally, you can use the following commands:
 
 ```bash
 # Install tools
@@ -20,7 +20,8 @@ cd ic_signer
 dfx start --background
 
 # Download the internet identity and deploys it locally, you can skip this for mainnet
-# After deploying, copy the canister ID fom the Internet Identity canister, and paste it into webpack/dfinity.js in this project on the LOCAL_II_CANISTER variable on line 45.
+# After deploying, copy the canister ID fom the Internet Identity canister, 
+# And paste it into webpack/dfinity.js in this project on the LOCAL_II_CANISTER variable on line 45.
 cd ..
 git clone https://github.com/dfinity/internet-identity.git
 cd ../internet-identity
@@ -33,9 +34,9 @@ npm install
 dfx deploy
 ```
 
-Once the job completes, your application will be available at `http://localhost:8000?canisterId={asset_canister_id}`.
+Once the job completes, ic_signer will be available at `http://localhost:8000?canisterId={asset_canister_id}`.
 
-To learn more before you start working with ic_signer, see the following documentation available online:
+To learn more, see the following documentation available online:
 
 - [Quick Start](https://smartcontracts.org/docs/quickstart/quickstart-intro.html)
 - [SDK Developer Tools](https://smartcontracts.org/docs/developers-guide/sdk-guide.html)
