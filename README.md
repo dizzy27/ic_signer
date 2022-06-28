@@ -19,12 +19,12 @@ git clone https://github.com/dizzy27/ic_signer.git
 cd ic_signer
 dfx start --background
 
-# Download the internet identity and deploys it locally, you can skip this for mainnet
+# Download the internet identity and deploy it locally, you can skip this for mainnet
 # After deploying, copy the canister ID fom the Internet Identity canister
 # And paste it into webpack/dfinity.js in this project on the LOCAL_II_CANISTER variable on line 45.
 cd ..
 git clone https://github.com/dfinity/internet-identity.git
-cd ../internet-identity
+cd internet-identity
 rm -rf .dfx/local
 II_FETCH_ROOT_KEY=1 II_DUMMY_CAPTCHA=1  dfx deploy --no-wallet --argument '(null)'
 
